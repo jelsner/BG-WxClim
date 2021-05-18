@@ -1,0 +1,239 @@
+---
+title: "Bulgarian Weather & Climate"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+library(terra)
+library(lubridate)
+library(ggthemes)
+```
+
+Get European Environment Agency (EEA) reference grid shapefiles at 1, 10, and 100 km resolution from https://www.eea.europa.eu/data-and-maps/data/eea-reference-grids-2/gis-files/bulgaria-shapefile
+```{r}
+unzip(zipfile = "Bulgaria_shapefile.zip", 
+      exdir = "Bulgaria")
+
+Bulgaria.sf <- st_read(dsn = "Bulgaria",
+                       layer = "bg_10km")
+
+plot(Bulgaria.sf$geometry)
+```
+
+Administrative boundaries https://data.humdata.org/dataset/bulgaria-administrative-level-0-2-boundaries
+```{r}
+unzip(zipfile = "bgr_adm_unicef_2019_shp.zip", 
+      exdir = "Bulgaria")
+
+Bulgaria0.sf <- st_read(dsn = "Bulgaria",
+                        layer = "bgr_admbnda_adm0_UNICEF_2019")
+plot(Bulgaria0.sf$geometry)
+
+Bulgaria1.sf <- st_read(dsn = "Bulgaria",
+                        layer = "bgr_admbnda_adm1_UNICEF_2019")
+plot(Bulgaria1.sf$geometry)
+
+Bulgaria2.sf <- st_read(dsn = "Bulgaria",
+                        layer = "bgr_admbnda_adm2_UNICEF_2019")
+plot(Bulgaria2.sf$geometry)
+
+library(crsuggest)
+suggest_crs(Bulgaria0.sf)
+```
+
+Get climate data: 1958-2019
+```{r}
+df <- climateR::getTerraClim(Bulgaria0.sf, 
+                             param = "tmax", 
+                             startDate = "2019-07-04", 
+                             endDate = "2019-07-04")[[1]]
+
+plot(df)
+plot(Bulgaria0.sf$geometry, 
+     add = TRUE)
+
+SofiaCity.sf <- Bulgaria1.sf %>%
+  dplyr::filter(ADM1_EN == "Sofia-City")
+
+df <- climateR::getTerraClim(SofiaCity.sf, 
+                             param = "tmax", 
+                             startDate = "2019-07-01", # monthly only
+                             endDate = "2019-07-01")
+plot(df$terraclim_tmax)
+plot(SofiaCity.sf$geometry, 
+     add = TRUE)
+```
+
+Convert to {stars} object.
+```{r}
+library(stars)
+
+df <- climateR::getTerraClim(SofiaCity.sf, 
+                             param = "tmax", 
+                             startDate = "2019-01-01", 
+                             endDate = "2019-12-01")
+
+tmax.st <- st_as_stars(df$terraclim_tmax)
+
+names(tmax.st) <- "C"
+
+months <- seq(as_date("2019-01-01"), 
+              as_date("2019-12-01"), 
+              by = "month")
+
+months <- month.abb
+
+( tmax.st <- st_set_dimensions(tmax.st, 
+                               which = 3, 
+                               values = months, names = "month") )
+
+X <- st_crop(tmax.st, 
+             SofiaCity.sf, 
+             crop = TRUE)
+
+ggplot() +  
+  geom_stars(data = X) + 
+  facet_wrap("month") +
+  scale_fill_viridis_c() +
+  coord_sf() +
+  theme_map() +
+  theme(legend.position = "bottom") +
+  theme(legend.key.width = unit(2, "cm"))
+```
+
+Get CHIRPS data. Daily rainfall rasters. https://www.chc.ucsb.edu/data/chirps. https://www.nature.com/articles/sdata201566
+
+Daily rainfall in Sofia city amounts July 2019.
+```{r}
+t0 <- Sys.time()
+start <- "2019-01-01"
+end <- "2019-12-31"
+df <- climateR::getCHIRPS(SofiaCity.sf, 
+                          startDate = start, 
+                          endDate = end) 
+Sys.time() - t0
+
+# Time difference of 4.4 mins
+
+#library(rasterVis)
+#levelplot(df)
+
+prcp.st <- st_as_stars(df)
+names(prcp.st) <- "mm"
+
+days <- seq(as_date(start), 
+            as_date(end), 
+            by = "day")
+
+( prcp.st <- st_set_dimensions(prcp.st, 
+                               which = 3, 
+                               values = days, names = "date") )
+
+X <- st_crop(prcp.st, 
+             SofiaCity.sf, 
+             crop = TRUE)
+
+ggplot() +  
+  geom_stars(data = X) + 
+  facet_wrap("date") +
+  scale_fill_viridis_c() +
+  coord_sf() +
+  theme_map() +
+  theme(legend.position = "bottom") +
+  theme(legend.key.width = unit(2, "cm"))
+
+prcp.st %>% 
+  as_tibble() %>%
+  group_by(date) %>% 
+  summarize(avgR = mean(mm, na.rm = TRUE))
+```
+
+Daily rainfall amounts in Bulgaria March 2021.
+```{r}
+start <- "2021-03-01"
+end <- "2021-03-31"
+df <- climateR::getCHIRPS(Bulgaria0.sf, 
+                          startDate = start, 
+                          endDate = end) 
+
+prcp.st <- st_as_stars(df)
+names(prcp.st) <- "mm"
+
+days <- seq(as_date(start), 
+            as_date(end), 
+            by = "day")
+
+( prcp.st <- st_set_dimensions(prcp.st, 
+                               which = 3, 
+                               values = days, 
+                               names = "date") )
+
+X <- st_crop(prcp.st, 
+             Bulgaria0.sf, 
+             crop = TRUE)
+
+ggplot() +  
+  geom_stars(data = X) + 
+  facet_wrap("date") +
+  scale_fill_viridis_c() +
+  coord_sf() +
+  theme_map() +
+  theme(legend.position = "bottom") +
+  theme(legend.key.width = unit(2, "cm"))
+```
+
+
+The database of Open Street Maps https://dominicroye.github.io/en/2018/accessing-openstreetmap-data-with-r/
+```{r}
+library(osmdata)
+library(ggmap)
+
+head(available_features())
+head(available_tags("amenity"))
+head(available_tags("shop"))
+```
+
+Build a query.
+```{r}
+q <- getbb("Sofia, Bulgaria") %>%
+  opq() %>%
+  add_osm_feature(key = "amenity",
+                  value = "restaurant")
+str(q)
+
+restaurants <- osmdata_sf(q)
+```
+
+Make a map.
+```{r}
+mad_map <- get_map(getbb("Sofia, Bulgaria"), 
+                   maptype = "toner-background")
+
+#final map
+ggmap(mad_map) +
+  geom_sf(data = restaurants$osm_points,
+          inherit.aes = FALSE,
+          colour = "#238443",
+          fill = "#004529",
+          alpha = .5,
+          size = 4,
+          shape = 21)+
+  labs(x = "", y = "")
+```
+
+```{r}
+# remotes::install_github("mikejohnson51/AOI")
+# remotes::install_github("mikejohnson51/climateR")
+library(raster)
+library(AOI)
+library(climateR)
+select <- dplyr::select  # make sure that the select you want is from {dplyr} (not the one in {raster})
+
+country_of_interest <- "Bulgaria"
+AOI <- aoi_get(country = country_of_interest)
+plot(AOI$geometry)
+```
