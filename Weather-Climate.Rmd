@@ -1,16 +1,20 @@
 ---
-title: "Bulgarian Weather & Climate"
+title: "Bulgaria's Weather & Climate"
 output: html_document
 editor_options: 
   chunk_output_type: console
 ---
 
 ```{r}
-library(tidyverse)
-library(sf)
+library(raster)
 library(terra)
+library(stars)
+library(tidyverse)
 library(lubridate)
+library(rgdal)
+library(sf)
 library(ggthemes)
+library(here)
 ```
 
 Get European Environment Agency (EEA) reference grid shapefiles at 1, 10, and 100 km resolution from https://www.eea.europa.eu/data-and-maps/data/eea-reference-grids-2/gis-files/bulgaria-shapefile
@@ -43,6 +47,28 @@ plot(Bulgaria2.sf$geometry)
 
 library(crsuggest)
 suggest_crs(Bulgaria0.sf)
+```
+
+Read CHIRPS with {stars} https://github.com/loreabad6/chirps-stars
+```{r}
+url <- "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_daily/netcdf/p05/"
+file <- "chirps-v2.0.1981.days_p05.nc"
+fn <- paste0(url, file)
+
+fn <- "chirps-v2.0.1981.01.01.tif"
+
+chirps1981 <- read_stars(fn, NA_value = -9999)
+chirps1981
+
+url <- "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_daily/tifs/p05/1981/"
+file <- "chirps-v2.0.1981.01.01.tif.gz"
+
+download.file(url = paste0(url, file),
+              destfile = "data/temp.zip.gz")
+library(R.utils)
+gunzip("data/temp.zip.gz")
+
+chirps1981 <- read_stars("data/temp.zip.gz", NA_value = -9999)
 ```
 
 Get climate data: 1958-2019
