@@ -18,8 +18,8 @@ library(here)
 
 Administrative boundaries https://data.humdata.org/dataset/bulgaria-administrative-level-0-2-boundaries
 ```{r}
-unzip(zipfile = "bgr_adm_unicef_2019_shp.zip", 
-      exdir = "Bulgaria")
+#unzip(zipfile = "bgr_adm_unicef_2019_shp.zip", 
+#      exdir = "Bulgaria")
 
 Bulgaria0.sf <- st_read(dsn = "Bulgaria",
                         layer = "bgr_admbnda_adm0_UNICEF_2019")
@@ -29,9 +29,13 @@ Bulgaria1.sf <- st_read(dsn = "Bulgaria",
                         layer = "bgr_admbnda_adm1_UNICEF_2019")
 plot(Bulgaria1.sf$geometry)
 
+SofiaCity.sf <- Bulgaria1.sf %>%
+  filter(ADM1_EN == "Sofia-City")
+
 Bulgaria2.sf <- st_read(dsn = "Bulgaria",
                         layer = "bgr_admbnda_adm2_UNICEF_2019")
 plot(Bulgaria2.sf$geometry)
+
 
 library(crsuggest)
 suggest_crs(Bulgaria0.sf)
@@ -48,8 +52,18 @@ Bulgaria.sf <- st_read(dsn = "Bulgaria",
 plot(Bulgaria.sf$geometry)
 ```
 
+Get European daily precip and tmax, tmin data from a cloud-optimized geotiff (COG) hosted at ftp://palantir.boku.ac.at/Public/ClimateData/
+
+Readme.txt: 
+
 https://frodriguezsanchez.net/post/accessing-data-from-large-online-rasters-with-cloud-optimized-geotiff-gdal-and-terra-r-package/
 
+Temperatures are given as celsius * 100 and precipitation is given as mm * 100. For questions please contact: mathias.neumann@boku.ac.at
+
+Citation:
+Moreno, A., & Hasenauer, H. (2015). Spatial downscaling of European climate data. International Journal of Climatology.DOI: 10.1002/joc.4436
+
+Precipitation in 2010
 ```{r}
 cog.url <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v2_cogeo/AllDataRasters/prec/DownscaledPrcp2010_cogeo.tif"
 
@@ -58,9 +72,17 @@ ras
 
 # center lat/lon Sofia City district (23.39864 42.67827)
 
-site.coords <- data.frame(lon = 23.39864, lat = 42.67827)
-Sofia.df <- terra::extract(ras,
-                           site.coords)
+coords <- data.frame(lon = 23.39864, lat = 42.67827)
+SofiaPrcp2010 <- terra::extract(ras,
+                                coords,
+                                list = TRUE) %>%
+  unlist()
+```
+
+Daily high temperature in 2010
+```{r}
+cog.url <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v2_cogeo/AllDataRasters/tmax/DownscaledTmax2010_cogeo.tif"
+
 ```
 
 Make Bulgaria boundary a `vect` object.
