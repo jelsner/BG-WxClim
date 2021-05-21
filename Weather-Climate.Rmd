@@ -73,6 +73,7 @@ ras
 # center lat/lon Sofia City district (23.39864 42.67827)
 
 coords <- data.frame(lon = 23.39864, lat = 42.67827)
+coords.apt <- data.frame(lon = 23.36161, lat = 42.67856)
 SofiaPrcp2010 <- terra::extract(ras,
                                 coords,
                                 list = TRUE) %>%
@@ -82,22 +83,85 @@ SofiaPrcp2010 <- terra::extract(ras,
 Daily high temperature in 2010
 ```{r}
 cog.url <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v2_cogeo/AllDataRasters/tmax/DownscaledTmax2010_cogeo.tif"
-
+ras <- rast(cog.url)
+ras
 ```
 
-Make Bulgaria boundary a `vect` object.
+Make Sofia city boundary a `vect` object.
 ```{r}
-Bulgaria0.v <- vect(Bulgaria0.sf)
+SofiaCity.v <- vect(SofiaCity.sf)
 
-Bulgaria.df <- terra::extract(ras,
-                              Bulgaria0.v,
-                              fun = mean,
-                              na.rm = TRUE)
+Tmax.r <- terra::crop(ras,
+                      SofiaCity.v) / 100
 
-Precip.r <- terra::crop(ras,
-                        Bulgaria0.v)
-plot(Precip.r)
+coords.apt.v <- vect(coords.apt)
+coords.v <- vect(coords)
+plot(Tmax.r[[1]])
+plot(SofiaCity.v, add = TRUE)
+plot(coords.apt.v, add = TRUE, col = "red")
 ```
+
+Convert daily `SpatRaster` object to a data frame with each row a grid location and columns 3:365 the daily values.
+```{r}
+Tmax.df <- as.data.frame(Tmax.r, xy = TRUE) %>%
+  set_names(nm = c("lon", "lat", str_c("D", 1:365)))
+head(Tmax.df[, 1:10])
+range(Tmax.df[,-(1:2)])
+```
+
+The database of Open Street Maps https://dominicroye.github.io/en/2018/accessing-openstreetmap-data-with-r/
+```{r}
+library(osmdata)
+library(ggmap)
+
+head(available_features())
+head(available_tags("amenity"))
+head(available_tags("shop"))
+```
+
+Build a query.
+```{r}
+q <- getbb("Sofia, Bulgaria") %>%
+  opq() %>%
+  add_osm_feature(key = "surface")
+str(q)
+
+surfaceRoads <- osmdata_sf(q)
+plot(surfaceRoads$osm_lines$geometry)
+
+q <- getbb("Sofia, Bulgaria") %>%
+  opq() %>%
+  add_osm_feature(key = "public_transport")
+str(q)
+
+publicTransport <- osmdata_sf(q)
+plot(publicTransport$osm_lines$geometry)
+
+q <- getbb("Sofia, Bulgaria") %>%
+  opq() %>%
+  add_osm_feature(key = "amenity",
+                  value = "restaurant")
+str(q)
+
+restaurants <- osmdata_sf(q)
+```
+
+Make a map.
+```{r}
+mad_map <- get_map(getbb("Sofia, Bulgaria"), 
+                   maptype = "toner-background",
+                   source = "stamen")
+
+coords.apt.sf <- st_as_sf(coords.apt.v) 
+st_crs(coords.apt.sf) <- 4326
+
+ggmap(mad_map) +
+  geom_sf(data = coords.apt.sf,
+          inherit.aes = FALSE,
+          colour = "red")
+```
+
+
 
 Read CHIRPS with {stars} https://github.com/loreabad6/chirps-stars
 ```{r}
@@ -262,44 +326,6 @@ ggplot() +
   theme(legend.key.width = unit(2, "cm"))
 ```
 
-
-The database of Open Street Maps https://dominicroye.github.io/en/2018/accessing-openstreetmap-data-with-r/
-```{r}
-library(osmdata)
-library(ggmap)
-
-head(available_features())
-head(available_tags("amenity"))
-head(available_tags("shop"))
-```
-
-Build a query.
-```{r}
-q <- getbb("Sofia, Bulgaria") %>%
-  opq() %>%
-  add_osm_feature(key = "amenity",
-                  value = "restaurant")
-str(q)
-
-restaurants <- osmdata_sf(q)
-```
-
-Make a map.
-```{r}
-mad_map <- get_map(getbb("Sofia, Bulgaria"), 
-                   maptype = "toner-background")
-
-#final map
-ggmap(mad_map) +
-  geom_sf(data = restaurants$osm_points,
-          inherit.aes = FALSE,
-          colour = "#238443",
-          fill = "#004529",
-          alpha = .5,
-          size = 4,
-          shape = 21)+
-  labs(x = "", y = "")
-```
 
 ```{r}
 # remotes::install_github("mikejohnson51/AOI")
