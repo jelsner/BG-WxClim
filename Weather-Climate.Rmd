@@ -16,7 +16,74 @@ library(ggthemes)
 library(here)
 ```
 
+Project 0: Compare daily observational data with data from downscaling projects.
+
 Project 1: Create a space-time object of daily high/low temperatures and precipitation for all 1x1 km grid cells inside the boundary defined by Sofia grad over the period 1950-2020. Then examine climatologies / trends at specific locations (e.g., apartment).
+
+Sofia Bulgaria weather and climate station (WMO 15614). https://www.ncdc.noaa.gov/cdo-web/datasets/GHCND/stations/GHCND:BUM00015614/detail
+42.695°, 23.406° Temperatures in F and precipitation in inches. 00Z to 00Z
+```{r}
+SOF.df <- read.csv(file = "SOF_1952_2021.csv") |>
+  mutate(Date = as.Date(DATE),
+         Prcp = PRCP * 25.4) |>
+  select(Date, Tmax = TMAX, Tmin = TMIN, Tavg = TAVG, Prcp)
+```
+
+
+Check out the {climate} package for downloading station observation data. https://www.rdocumentation.org/packages/climate/versions/1.0.3
+```{r}
+remotes::install_github("bczernecki/climate")
+library(climate)
+```
+
+Find nearest stations.
+```{r}
+nearest_stations_ogimet(country = "Bulgaria",
+  date = Sys.Date(),
+  add_map = TRUE,
+  point = c(23.406, 42.695),
+  no_of_stations = 100
+)
+
+# 15614 Sofia Observ. 23.38334 42.65001  586 meters lon/lat does not match
+
+( SOF2.df <- meteo_ogimet(date = c(as.Date("2020-02-20"), as.Date("2020-02-22")), 
+                        interval = "daily",
+                        coords = FALSE, 
+                        station = 15614) |>
+  mutate(Tmax = TemperatureCMax * 1.8 + 32,
+         Tmin = TemperatureCMin * 1.8 + 32,
+         Tavg = TemperatureCAvg * 1.8 + 32,
+         Prcp = Precmm) |>
+  select(Date, Tmax, Tmin, Tavg, Prcp) |>
+  arrange(Date) )
+```
+
+Daily are 6am to 6am (9 UTC to 9 UTC) and put on the second morning date.
+
+```{r}
+Z <- SOF2.df |>
+  left_join(SOF.df, by = "Date")
+```
+
+Turn 3-hourlies into daily max/min, precip.
+```{r}
+( SOF3.df <- meteo_ogimet(date = c(as.Date("2020-01-01"), as.Date("2020-07-08")), 
+                          interval = "hourly",
+                          coords = FALSE, 
+                          station = 15614) |>
+  select(Date, TC, TmaxC, TminC, pr6, pr12, pr24) |>
+  arrange(Date) )
+
+( SOF4.df <- SOF3.df |>
+  mutate(Date = with_tz(Date, "EET"),
+         YMD = as.Date(Date)) |>
+  group_by(YMD) |>
+  summarize(Tmax_C = max(as.numeric(TmaxC), na.rm = TRUE),
+            Tmin_C = min(as.numeric(TminC), na.rm = TRUE),
+            Prcp_mm = sum(pr12, na.rm = TRUE)) )
+```
+
 
 Administrative boundaries https://data.humdata.org/dataset/bulgaria-administrative-level-0-2-boundaries
 ```{r}
@@ -41,36 +108,175 @@ library(crsuggest)
 suggest_crs(Bulgaria0.sf)
 ```
 
-Get European Environment Agency (EEA) reference grid shapefiles at 1, 10, and 100 km resolution from https://www.eea.europa.eu/data-and-maps/data/eea-reference-grids-2/gis-files/bulgaria-shapefile
-```{r}
-unzip(zipfile = "Bulgaria_shapefile.zip", 
-      exdir = "Bulgaria")
+Also the European Environment Agency (EEA) reference grid shapefiles at 1, 10, and 100 km resolution from https://www.eea.europa.eu/data-and-maps/data/eea-reference-grids-2/gis-files/bulgaria-shapefile
+```{r, eval=FALSE}
+#unzip(zipfile = "Bulgaria_shapefile.zip", 
+#      exdir = "Bulgaria")
 Bulgaria.sf <- st_read(dsn = "Bulgaria",
-                       layer = "bg_100km")
+                       layer = "bg_10km")
 plot(Bulgaria.sf$geometry)
+st_crs(Bulgaria.sf)
 ```
 
-Get European daily precip and tmax, tmin data from a cloud-optimized geotiff (COG) hosted at ftp://palantir.boku.ac.at/Public/ClimateData/
+Get European daily precip and tmax, tmin data from a cloud-optimized geotiff (COG) hosted at ftp://palantir.boku.ac.at/Public/ClimateData/ See: Readme.txt
 
-Readme.txt: 
+Accessing data from cloud optimised geotiffs with R: https://frodriguezsanchez.net/post/accessing-data-from-large-online-rasters-with-cloud-optimized-geotiff-gdal-and-terra-r-package/
 
-https://frodriguezsanchez.net/post/accessing-data-from-large-online-rasters-with-cloud-optimized-geotiff-gdal-and-terra-r-package/
+Temperatures are given as celsius * 100 and precipitation is given as mm * 100. For questions please contact: mathias.neumann@boku.ac.at v3 1950-2020. Citation: Moreno, A., & Hasenauer, H. (2015). Spatial downscaling of European climate data. International Journal of Climatology.DOI: 10.1002/joc.4436 https://rmets.onlinelibrary.wiley.com/doi/10.1002/joc.4436
 
-Temperatures are given as celsius * 100 and precipitation is given as mm * 100. For questions please contact: mathias.neumann@boku.ac.at v3 1950-2020
-
-Citation: Moreno, A., & Hasenauer, H. (2015). Spatial downscaling of European climate data. International Journal of Climatology.DOI: 10.1002/joc.4436 https://rmets.onlinelibrary.wiley.com/doi/10.1002/joc.4436
-
-
-Precipitation in 2020
+Precipitation rasters. About 12 secs per year. Start by making SofiaCity.v a vect object.
 ```{r}
-cog.url <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v3_cogeo/AllDataRasters/prec/DownscaledPrcp2020_cogeo.tif"
-ppt.r <- rast(cog.url)
-# center lat/lon Sofia City district (23.39864 42.67827)
+SofiaCity.v <- vect(SofiaCity.sf)
 
-coords <- data.frame(lon = 23.39864, lat = 42.67827)
-coords.apt <- data.frame(lon = 23.36161, lat = 42.67856)
-SofiaPrcp2020 <- terra::extract(ppt.r,
-                                coords.apt,
+t0 <- Sys.time()
+
+cog.url0 <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v3_cogeo/AllDataRasters/prec/DownscaledPrcp2018_cogeo.tif"
+cog.url1 <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v3_cogeo/AllDataRasters/prec/DownscaledPrcp2019_cogeo.tif"
+cog.url2 <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v3_cogeo/AllDataRasters/prec/DownscaledPrcp2020_cogeo.tif"
+
+urls <- c(cog.url0, cog.url1, cog.url2)
+
+ppt.r <- rast(urls) |>
+  terra::crop(SofiaCity.v)
+
+Sys.time() - t0
+```
+
+Convert to a {stars} object.
+```{r}
+ppt.st <- st_as_stars(ppt.r)
+
+dates <- seq.Date(from = as.Date("2018-01-01"),
+                  to = as.Date("2020-12-31"),
+                  by = "days")
+
+ppt.st <- ppt.st |>
+  st_set_dimensions(which = "band", 
+                    values = dates, 
+                    names = "time") / 100
+
+ppt.st <- ppt.st |>
+  st_crop(SofiaCity.sf) |>
+  setNames("Precipitation_mm")
+```
+
+Check precipitation values over 30 days in July.
+```{r}
+X <- filter(ppt.st, 
+            time >= ymd("2018-07-01"), 
+            time <= ymd("2018-07-30"))
+
+ggplot() +  
+  geom_stars(data = X["Precipitation_mm"], alpha = .8, downsample = c(0, 0, 0)) + 
+  facet_wrap(~ time) +
+  scale_fill_viridis_c() +
+#  scale_fill_distiller(palette = "RdBu") +
+  coord_equal() +
+  theme_map() +
+  theme(legend.position = "bottom") +
+  theme(legend.key.width = unit(2, "cm"))
+```
+
+The down-scaling smooths spatial variations as seen by the fact that if at least one cell gets rain there is rain over most of the city. 
+
+Compare with daily rainfall rasters from CHIRPS (climate hazards infrared precipitation with stations). https://www.chc.ucsb.edu/data/chirps. https://www.nature.com/articles/sdata201566
+```{r}
+# remotes::install_github("mikejohnson51/AOI")
+# remotes::install_github("mikejohnson51/climateR")
+library(raster)
+library(AOI)
+library(climateR)
+select <- dplyr::select  # make sure that the select you want is from {dplyr} (not the one in {raster})
+
+country_of_interest <- "Bulgaria"
+AOI <- aoi_get(country = country_of_interest)
+plot(AOI$geometry)
+```
+
+Daily rainfall in Sofia city.
+```{r}
+t0 <- Sys.time()
+start <- "2018-07-01"
+end <- "2018-07-30"
+ppt.rs <- climateR::getCHIRPS(SofiaCity.sf, 
+                              startDate = start, 
+                              endDate = end) 
+Sys.time() - t0
+
+dates2 <- seq.Date(from = as.Date(start),
+                   to = as.Date(end),
+                   by = "days")
+ppt2.st <- st_as_stars(ppt.rs) |>
+  st_set_dimensions(which = "band", 
+                    values = dates2, 
+                    names = "time") |>
+  st_crop(SofiaCity.sf, 
+          crop = TRUE) |>
+  setNames("Precipitation_mm")
+
+ggplot() +  
+  geom_stars(data = ppt2.st["Precipitation_mm"], alpha = .8, downsample = c(0, 0, 0)) + 
+  facet_wrap(~ time) +
+  scale_fill_viridis_c() +
+#  scale_fill_distiller(palette = "RdBu") +
+  coord_equal() +
+  theme_map() +
+  theme(legend.position = "bottom") +
+  theme(legend.key.width = unit(2, "cm"))
+
+ppt2.st |> 
+  as_tibble() |>
+  group_by(time) |> 
+  summarize(avgR = mean(Precipitation_mm, na.rm = TRUE))
+```
+
+
+
+
+
+
+Daily rainfall amounts in Bulgaria March 2021.
+```{r}
+start <- "2021-03-01"
+end <- "2021-03-31"
+df <- climateR::getCHIRPS(Bulgaria0.sf, 
+                          startDate = start, 
+                          endDate = end) 
+
+prcp.st <- st_as_stars(df)
+names(prcp.st) <- "mm"
+
+days <- seq(as_date(start), 
+            as_date(end), 
+            by = "day")
+
+( prcp.st <- st_set_dimensions(prcp.st, 
+                               which = 3, 
+                               values = days, 
+                               names = "date") )
+
+X <- st_crop(prcp.st, 
+             Bulgaria0.sf, 
+             crop = TRUE)
+
+ggplot() +  
+  geom_stars(data = X) + 
+  facet_wrap("date") +
+  scale_fill_viridis_c() +
+  coord_sf() +
+  theme_map() +
+  theme(legend.position = "bottom") +
+  theme(legend.key.width = unit(2, "cm"))
+```
+
+Extract values at a particular location.
+```{r}
+# center lat/lon Sofia City district (23.39864 42.67827)
+#coords.center <- data.frame(lon = 23.39864, lat = 42.67827)
+
+coords.apartm <- data.frame(lon = 23.36161, lat = 42.67856)
+precip_apartm <- terra::extract(ppt.r,
+                                coords.apartm,
                                 list = TRUE) |>
   unlist()
 ```
@@ -82,66 +288,12 @@ tmax.r <- rast(cog.url)
 tmax.r
 ```
 
-1 km elevation raster over Europe. https://www.eea.europa.eu/data-and-maps/data/digital-elevation-model-of-europe
+1 km elevation raster over Europe. Values are not elevation. https://www.eea.europa.eu/data-and-maps/data/digital-elevation-model-of-europe
 ```{r}
 elev.r <- rast("elevation1x1_new.tif")
 plot(elev.r)
-```
 
-Make Sofia city boundary a `vect` object and then crop the full raster to this object. This will create a smaller raster with the vector boundary defining the extent.
-```{r}
-SofiaCity.v <- vect(SofiaCity.sf)
-
-tmax.r <- terra::crop(tmax.r,
-                      SofiaCity.v) / 100
-
-elev.r <- terra::project(elev.r, tmax.r)
-
-
-coords.apt.v <- vect(coords.apt)
-coords.v <- vect(coords)
-#plot(tmax.r[[1]])
-plot(elev.r)
-plot(SofiaCity.v, add = TRUE)
-plot(coords.apt.v, add = TRUE, col = "red")
-```
-
-Convert to {stars} object then crop to the Sofia city simple feature object. This will create a space-time vector object containing only cells whose center point fall within the simple feature.
-```{r}
-tmax.st <- st_as_stars(tmax.r)
-
-dates <- seq.Date(from = as.Date("2010-01-01"),
-                  to = as.Date("2010-12-31"),
-                  by = "days")
-
-tmax.st <- tmax.st |>
-  st_set_dimensions(which = "band", 
-                    values = dates, 
-                    names = "time")
-
-tmax.st <- tmax.st |>
-  st_crop(SofiaCity.sf) |>
-  setNames("Tmax_C")
-
-X <- filter(tmax.st, 
-            time == ymd("2010-01-01"))
-plot(X)
-```
-
-Check temperature variations over 30 days in June.
-```{r}
-X <- filter(tmax.st, 
-            time >= ymd("2010-06-01"), 
-            time <= ymd("2010-06-30"))
-
-ggplot() +  
-  geom_stars(data = X["Tmax_C"], alpha = .8, downsample = c(0, 0, 0)) + 
-  facet_wrap(~ time) +
-  scale_fill_distiller(palette = "RdBu") +
-  coord_equal() +
-  theme_map() +
-  theme(legend.position = "bottom") +
-  theme(legend.key.width = unit(2, "cm"))
+elev.r <- terra::project(elev.r, ppt.r)
 ```
 
 Convert daily `SpatRaster` object to a data frame with each row a grid location and columns 3:365 the daily values.
@@ -152,28 +304,10 @@ head(Tmax.df[, 1:10])
 range(Tmax.df[,-(1:2)])
 ```
 
-## Import as space-time {stars} object and crop to the Sofia City boundary
 
-```{r}
-cog.url <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v2_cogeo/AllDataRasters/prec/DownscaledPrcp2010_cogeo.tif"
-ppt <- read_stars(cog.url)
-cog.url <- "/vsicurl/ftp://palantir.boku.ac.at/Public/ClimateData/v2_cogeo/AllDataRasters/tmax/DownscaledTmax2010_cogeo.tif"
-tmax <- read_stars(cog.url)
-TP.st <- c(tmax, ppt) |>
-    setNames(c("Tmax", "Prcp"))
-dates <- seq.Date(from = as.Date("2010-01-01"),
-                  to = as.Date("2010-12-31"),
-                  by = "days")
-TP.st <- TP.st |>
-  st_set_dimensions(which = "band", 
-                    values = dates, 
-                    names = "days") |>
-  st_crop(SofiaCity.sf)
 
-X <- filter(TP.st["Tmax"], 
-            time == ymd("2010-01-01"))
-plot(X)
-```
+
+
 
 The database of Open Street Maps https://dominicroye.github.io/en/2018/accessing-openstreetmap-data-with-r/
 ```{r}
@@ -311,97 +445,6 @@ ggplot() +
   theme(legend.key.width = unit(2, "cm"))
 ```
 
-Get CHIRPS data. Daily rainfall rasters. https://www.chc.ucsb.edu/data/chirps. https://www.nature.com/articles/sdata201566
-
-Daily rainfall in Sofia city amounts July 2019.
-```{r}
-t0 <- Sys.time()
-start <- "2019-01-01"
-end <- "2019-12-31"
-df <- climateR::getCHIRPS(SofiaCity.sf, 
-                          startDate = start, 
-                          endDate = end) 
-Sys.time() - t0
-
-# Time difference of 4.4 mins
-
-#library(rasterVis)
-#levelplot(df)
-
-prcp.st <- st_as_stars(df)
-names(prcp.st) <- "mm"
-
-days <- seq(as_date(start), 
-            as_date(end), 
-            by = "day")
-
-( prcp.st <- st_set_dimensions(prcp.st, 
-                               which = 3, 
-                               values = days, names = "date") )
-
-X <- st_crop(prcp.st, 
-             SofiaCity.sf, 
-             crop = TRUE)
-
-ggplot() +  
-  geom_stars(data = X) + 
-  facet_wrap("date") +
-  scale_fill_viridis_c() +
-  coord_sf() +
-  theme_map() +
-  theme(legend.position = "bottom") +
-  theme(legend.key.width = unit(2, "cm"))
-
-prcp.st %>% 
-  as_tibble() %>%
-  group_by(date) %>% 
-  summarize(avgR = mean(mm, na.rm = TRUE))
-```
-
-Daily rainfall amounts in Bulgaria March 2021.
-```{r}
-start <- "2021-03-01"
-end <- "2021-03-31"
-df <- climateR::getCHIRPS(Bulgaria0.sf, 
-                          startDate = start, 
-                          endDate = end) 
-
-prcp.st <- st_as_stars(df)
-names(prcp.st) <- "mm"
-
-days <- seq(as_date(start), 
-            as_date(end), 
-            by = "day")
-
-( prcp.st <- st_set_dimensions(prcp.st, 
-                               which = 3, 
-                               values = days, 
-                               names = "date") )
-
-X <- st_crop(prcp.st, 
-             Bulgaria0.sf, 
-             crop = TRUE)
-
-ggplot() +  
-  geom_stars(data = X) + 
-  facet_wrap("date") +
-  scale_fill_viridis_c() +
-  coord_sf() +
-  theme_map() +
-  theme(legend.position = "bottom") +
-  theme(legend.key.width = unit(2, "cm"))
-```
 
 
-```{r}
-# remotes::install_github("mikejohnson51/AOI")
-# remotes::install_github("mikejohnson51/climateR")
-library(raster)
-library(AOI)
-library(climateR)
-select <- dplyr::select  # make sure that the select you want is from {dplyr} (not the one in {raster})
 
-country_of_interest <- "Bulgaria"
-AOI <- aoi_get(country = country_of_interest)
-plot(AOI$geometry)
-```
