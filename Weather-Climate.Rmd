@@ -21,7 +21,7 @@ Project 0: Compare daily observational data with data from downscaling projects.
 Project 1: Create a space-time object of daily high/low temperatures and precipitation for all 1x1 km grid cells inside the boundary defined by Sofia grad over the period 1950-2020. Then examine climatologies / trends at specific locations (e.g., apartment).
 
 Sofia Bulgaria weather and climate station (WMO 15614). https://www.ncdc.noaa.gov/cdo-web/datasets/GHCND/stations/GHCND:BUM00015614/detail
-42.695°, 23.406° Temperatures in F and precipitation in inches. 00Z to 00Z
+42.695°, 23.406° Temperatures in F and precipitation in inches (hundreths). 00Z to 00Z
 ```{r}
 SOF.df <- read.csv(file = "SOF_1952_2021.csv") |>
   mutate(Date = as.Date(DATE),
@@ -82,6 +82,12 @@ Turn 3-hourlies into daily max/min, precip.
   summarize(Tmax_C = max(as.numeric(TmaxC), na.rm = TRUE),
             Tmin_C = min(as.numeric(TminC), na.rm = TRUE),
             Prcp_mm = sum(pr12, na.rm = TRUE)) )
+```
+
+```{r}
+Z <- SOF4.df |>
+  mutate(Date = YMD) |>
+  left_join(SOF.df, by = "Date")
 ```
 
 
